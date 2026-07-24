@@ -1,0 +1,87 @@
+name: Build Chinese ldn_mitm
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone official source
+        run: |
+          git clone --recursive https://github.com/spacemeowx2/ldn_mitm.git source
+
+      - name: Apply Simplified Chinese translation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          overlay = Path('source/overlay/source/main.cpp')
+          text = overlay.read_text(encoding='utf-8')
+          replacements = {
+              'ToggleListItem("Enabled", false)': 'ToggleListItem("启用 ldn_mitm", false)',
+              'ToggleListItem("Logging", false)': 'ToggleListItem("记录日志", false)',
+              '"ldn_mitm is not loaded."': '"ldn_mitm 未加载，请检查系统模块。"',
+              '"wrong state"': '"状态异常，请重新打开浮层。"',
+              '"failed to get version"': '"读取版本失败"',
+          }
+          for old, new in replacements.items():
+              text = text.replace(old, new)
+          overlay.write_text(text, encoding='utf-8')
+
+          config = Path('source/ldnmitm_config/source/main.cpp')
+          text = config.read_text(encoding='utf-8')
+          replacements = {
+              'Logging(X)': '记录日志（X）',
+              'Press X to toggle logging': '按 X 切换日志记录',
+              'Press Y to export log': '按 Y 导出日志',
+              'Export complete': '导出完成',
+              'wrong state': '状态异常',
+              'failed to get version': '读取版本失败',
+              'ldn_mitm is not loaded': 'ldn_mitm 未加载',
+          }
+          for old, new in replacements.items():
+              text = text.replace(old, new)
+          config.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Install latest libnx
+        run: |
+          dkp-pacman -Syu --noconfirm
+          git clone --depth 1 https://github.com/switchbrew/libnx /tmp/libnx
+          make -C /tmp/libnx -j$(nproc)
+          make -C /tmp/libnx install
+
+      - name: Build
+        working-directory: source
+        run: make -j$(nproc)
+
+      - name: Pack SD card files
+        working-directory: source/out/sd
+        run: zip -r ../../../ldn_mitm-Chinese-SD.zip atmosphere switch
+
+      - name: Upload SD package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ldn_mitm-Chinese-SD
+          path: source/ldn_mitm-Chinese-SD.zip
+
+      - name: Upload individual binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ldn_mitm-Chinese-binaries
+          path: |
+            source/ldnmitm_config/ldnmitm_config.nro
+            source/overlay/overlay.ovl
+            source/ldn_mitm/ldn_mitm.nsp
+          if-no-files-found: warn
