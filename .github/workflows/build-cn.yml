@@ -55,12 +55,12 @@ jobs:
           config.write_text(text, encoding='utf-8')
           PY
 
-      - name: Install latest libnx
+      - name: Verify toolchain
         run: |
-          dkp-pacman -Syu --noconfirm
-          git clone --depth 1 https://github.com/switchbrew/libnx /tmp/libnx
-          make -C /tmp/libnx -j$(nproc)
-          make -C /tmp/libnx install
+          echo "DEVKITPRO=$DEVKITPRO"
+          echo "DEVKITA64=$DEVKITA64"
+          test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
+          test -d "$DEVKITPRO/libnx"
 
       - name: Build
         working-directory: source
