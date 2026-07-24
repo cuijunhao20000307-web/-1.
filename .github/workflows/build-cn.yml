@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+      PATH: /opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     defaults:
       run:
         shell: bash
@@ -59,22 +63,19 @@ jobs:
         run: |
           echo "DEVKITPRO=$DEVKITPRO"
           echo "DEVKITA64=$DEVKITA64"
-          test -x "$DEVKITA64/bin/aarch64-none-elf-gcc"
+          "$DEVKITA64/bin/aarch64-none-elf-gcc" --version
           test -d "$DEVKITPRO/libnx"
 
       - name: Build
         working-directory: source
         run: make -j$(nproc)
 
-      - name: Pack SD card files
-        working-directory: source/out/sd
-        run: zip -r ../../../ldn_mitm-Chinese-SD.zip atmosphere switch
-
       - name: Upload SD package
         uses: actions/upload-artifact@v4
         with:
           name: ldn_mitm-Chinese-SD
-          path: source/ldn_mitm-Chinese-SD.zip
+          path: source/out/sd/
+          if-no-files-found: error
 
       - name: Upload individual binaries
         uses: actions/upload-artifact@v4
