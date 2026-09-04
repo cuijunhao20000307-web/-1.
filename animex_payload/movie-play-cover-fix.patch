@@ -1,0 +1,259 @@
+diff --git a/nxanime_source/media_resolver.cpp b/nxanime_source/media_resolver.cpp
+index 9312de3..000b86f 100644
+--- a/nxanime_source/media_resolver.cpp
++++ b/nxanime_source/media_resolver.cpp
+@@ -109,6 +109,136 @@ static std::string attr_direct_media(const std::string& html) {
+     return {};
+ }
+ 
++
++struct MediaProbeBuffer {
++    std::string data;
++    size_t limit = 128 * 1024;
++    bool truncated = false;
++};
++
++static size_t media_probe_write_cb(void* ptr, size_t size, size_t nmemb, void* userdata) {
++    if (!ptr || !userdata) return 0;
++    auto* out = static_cast<MediaProbeBuffer*>(userdata);
++    const size_t n = size * nmemb;
++    const size_t room = out->data.size() < out->limit ? out->limit - out->data.size() : 0;
++    const size_t take = std::min(room, n);
++    if (take) out->data.append(static_cast<const char*>(ptr), take);
++    if (take < n || out->data.size() >= out->limit) {
++        out->truncated = true;
++        return 0; // enough bytes to identify the response; stop a large MP4 body
++    }
++    return n;
++}
++
++static bool media_probe_payload(const std::string& body, const std::string& content_type) {
++    size_t p = 0;
++    if (body.size() >= 3 && (unsigned char)body[0] == 0xef &&
++        (unsigned char)body[1] == 0xbb && (unsigned char)body[2] == 0xbf) p = 3;
++    while (p < body.size() && std::isspace((unsigned char)body[p])) ++p;
++    if (body.compare(p, 7, "#EXTM3U") == 0) return true;
++
++    // ISO-BMFF/MP4 normally exposes an ftyp box in the first few dozen bytes.
++    const size_t inspect = std::min<size_t>(body.size(), 96);
++    for (size_t i = 4; i + 4 <= inspect; ++i)
++        if (body.compare(i, 4, "ftyp") == 0) return true;
++
++    std::string ct = content_type;
++    std::transform(ct.begin(), ct.end(), ct.begin(),
++                   [](unsigned char c){ return (char)std::tolower(c); });
++    return ct.find("video/mp4") != std::string::npos ||
++           ct.find("application/vnd.apple.mpegurl") != std::string::npos ||
++           ct.find("application/x-mpegurl") != std::string::npos ||
++           ct.find("audio/mpegurl") != std::string::npos;
++}
++
++static bool media_probe_once(const ProxyConfig& proxy,
++                             const std::string& url,
++                             const std::string& referer,
++                             std::string& effective_url,
++                             std::string& body,
++                             std::string& reason) {
++    CURL* c = curl_easy_init();
++    if (!c) { reason = "线路探测初始化失败"; return false; }
++    MediaProbeBuffer capture;
++    NetworkOptions options;
++    options.connect_timeout_seconds = 4;
++    options.total_timeout_seconds = 7;
++    options.low_speed_seconds = 3;
++    options.max_attempts = 1;
++    options.network_mode = proxy.network_mode;
++    options.allow_ipv4_fallback = false;
++    network_apply_common(c, options);
++    network_apply_proxy(c, proxy);
++    curl_easy_setopt(c, CURLOPT_URL, url.c_str());
++    curl_easy_setopt(c, CURLOPT_RANGE, "0-131071");
++    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, media_probe_write_cb);
++    curl_easy_setopt(c, CURLOPT_WRITEDATA, &capture);
++    curl_easy_setopt(c, CURLOPT_REFERER, referer.empty() ? nullptr : referer.c_str());
++    curl_easy_setopt(c, CURLOPT_USERAGENT,
++                     "Mozilla/5.0 (Nintendo Switch; ANIMEX/0.8.1) AppleWebKit/537.36");
++    curl_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
++    curl_easy_setopt(c, CURLOPT_IPRESOLVE,
++                     proxy.mode == PROXY_MODE_DIRECT && proxy.network_mode != 0
++                         ? CURL_IPRESOLVE_V4 : CURL_IPRESOLVE_WHATEVER);
++
++    const CURLcode rc = curl_easy_perform(c);
++    long http = 0;
++    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http);
++    char* effective = nullptr;
++    if (curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &effective) == CURLE_OK && effective)
++        effective_url = effective;
++    else effective_url = url;
++    char* ct = nullptr;
++    std::string content_type;
++    if (curl_easy_getinfo(c, CURLINFO_CONTENT_TYPE, &ct) == CURLE_OK && ct)
++        content_type = ct;
++    curl_easy_cleanup(c);
++
++    body = std::move(capture.data);
++    const bool transport_ok = rc == CURLE_OK || (capture.truncated && rc == CURLE_WRITE_ERROR);
++    if (!transport_ok || http < 200 || http >= 400) {
++        reason = "线路 HTTP/网络响应无效";
++        return false;
++    }
++    if (media_probe_payload(body, content_type)) return true;
++    reason = "线路返回的不是视频数据";
++    return false;
++}
++
++static bool media_probe_movie_url(const ProxyConfig& proxy,
++                                  std::string& url,
++                                  std::string& referer,
++                                  std::string& reason) {
++    // First mimic the site's no-referrer playback policy. Some mirrors instead
++    // require the site referer, so retry that policy only when the first probe
++    // returns non-media data.
++    for (int policy = 0; policy < 2; ++policy) {
++        const std::string probe_referer = policy == 0 ? referer : "https://kanju1.com/";
++        std::string effective, body;
++        if (media_probe_once(proxy, url, probe_referer, effective, body, reason)) {
++            if (is_direct_media(effective)) url = effective;
++            referer = probe_referer;
++            return true;
++        }
++
++        // Some line URLs are public resolver pages despite carrying a media
++        // extension. Pull a literal MP4/HLS URL out of their HTML/JSON body.
++        std::string nested = attr_direct_media(body);
++        if (nested.empty()) nested = literal_media_url(body);
++        if (!nested.empty() && nested != url) {
++            std::string nested_effective, nested_body, nested_reason;
++            if (media_probe_once(proxy, nested, probe_referer,
++                                 nested_effective, nested_body, nested_reason)) {
++                url = is_direct_media(nested_effective) ? nested_effective : nested;
++                referer = probe_referer;
++                reason = "已从线路响应提取真实视频地址";
++                return true;
++            }
++        }
++    }
++    return false;
++}
++
+ bool media_resolve_public(const ProxyConfig& proxy,
+                           const EpisodeItem& episode,
+                           MediaSource& out,
+@@ -116,18 +246,42 @@ bool media_resolve_public(const ProxyConfig& proxy,
+                           const std::vector<std::string>* rejected) {
+     out = MediaSource{};
+     if (episode.url.empty()) { status = "该集没有播放地址"; return false; }
+-    bool handled = false;
+-    std::string special_url, special_referer;
+-    if (provider_resolve_special_episode(proxy, episode, special_url, special_referer, status, handled, rejected)) {
+-        out.url = special_url;
+-        out.movie = episode.url.rfind("kanju://play/", 0) == 0;
+-        out.referer = special_referer;
+-        std::string low = special_url;
+-        std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c){return (char)std::tolower(c);});
+-        out.hls = low.find(".m3u8") != std::string::npos;
+-        return true;
++    const bool kanju_movie = episode.url.rfind("kanju://play/", 0) == 0;
++    std::vector<std::string> local_rejected = rejected ? *rejected : std::vector<std::string>{};
++    const int special_attempts = kanju_movie ? 5 : 1;
++    for (int attempt = 0; attempt < special_attempts; ++attempt) {
++        bool handled = false;
++        std::string special_url, special_referer;
++        const std::vector<std::string>* reject_arg = kanju_movie ? &local_rejected : rejected;
++        if (provider_resolve_special_episode(proxy, episode, special_url, special_referer,
++                                             status, handled, reject_arg)) {
++            if (kanju_movie) {
++                std::string probe_reason;
++                if (!media_probe_movie_url(proxy, special_url, special_referer, probe_reason)) {
++                    if (std::find(local_rejected.begin(), local_rejected.end(), special_url) == local_rejected.end())
++                        local_rejected.push_back(special_url);
++                    status = "电影线路无效 · 自动切换下一条";
++                    continue;
++                }
++                if (!probe_reason.empty()) status = probe_reason;
++            }
++            out.url = special_url;
++            out.movie = kanju_movie;
++            out.referer = special_referer;
++            std::string low = special_url;
++            std::transform(low.begin(), low.end(), low.begin(), [](unsigned char c){return (char)std::tolower(c);});
++            out.hls = low.find(".m3u8") != std::string::npos;
++            return true;
++        }
++        if (handled) {
++            if (!kanju_movie) return false;
++            break;
++        }
++    }
++    if (kanju_movie) {
++        status = "电影公开线路均未返回有效 MP4/HLS · 请稍后重试";
++        return false;
+     }
+-    if (handled) return false;
+     if (is_direct_media(episode.url)) {
+         out.url = episode.url;
+         out.referer = provider_active_referer();
+diff --git a/nxanime_source/main.cpp b/nxanime_source/main.cpp
+index a3ba496..9cb970d 100644
+--- a/nxanime_source/main.cpp
++++ b/nxanime_source/main.cpp
+@@ -417,7 +417,7 @@ static void ensure_home_cover_loader(State& st) {
+     // Movie posters are remote CDN assets and are noticeably slower than the
+     // local anime mirror. Six bounded workers fill the 12-card viewport in
+     // two batches, while still keeping each worker's curl handle isolated.
+-    const int cover_workers=provider_source_mode()==PROVIDER_SOURCE_KANJU?4:2;
++    const int cover_workers=provider_source_mode()==PROVIDER_SOURCE_KANJU?6:2;
+     // Keep creation under the cover mutex. A fast A/B press can otherwise
+     // call stop_home_cover_loader while the new threads are still starting,
+     // observe a zero count, and clear their vectors while they are running.
+diff --git a/nxanime_source/cover.cpp b/nxanime_source/cover.cpp
+index 615b9ec..dac7dc0 100644
+--- a/nxanime_source/cover.cpp
++++ b/nxanime_source/cover.cpp
+@@ -123,12 +123,12 @@ static bool download_movie_race(const ProxyConfig& proxy,const std::string& url,
+         network_apply_common(curl,options);network_apply_proxy(curl,proxy);
+         curl_easy_setopt(curl,CURLOPT_URL,address.c_str());
+         curl_easy_setopt(curl,CURLOPT_REFERER,"https://kanju1.com/");
+-        curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,3L);
+-        curl_easy_setopt(curl,CURLOPT_TIMEOUT,index==0?5L:4L);
+-        curl_easy_setopt(curl,CURLOPT_LOW_SPEED_TIME,3L);
++        curl_easy_setopt(curl,CURLOPT_CONNECTTIMEOUT,2L);
++        curl_easy_setopt(curl,CURLOPT_TIMEOUT,3L);
++        curl_easy_setopt(curl,CURLOPT_LOW_SPEED_TIME,2L);
+         curl_easy_setopt(curl,CURLOPT_IPRESOLVE,proxy.mode==PROXY_MODE_DIRECT&&proxy.network_mode!=0?CURL_IPRESOLVE_V4:CURL_IPRESOLVE_WHATEVER);
+         curl_easy_setopt(curl,CURLOPT_MAXFILESIZE_LARGE,(curl_off_t)writers[index].max_bytes);
+-        curl_easy_setopt(curl,CURLOPT_BUFFERSIZE,128L*1024L);
++        curl_easy_setopt(curl,CURLOPT_BUFFERSIZE,256L*1024L);
+         curl_easy_setopt(curl,CURLOPT_WRITEFUNCTION,file_write_cb);
+         curl_easy_setopt(curl,CURLOPT_WRITEDATA,&writers[index]);
+         curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
+@@ -143,7 +143,7 @@ static bool download_movie_race(const ProxyConfig& proxy,const std::string& url,
+     for(;;){
+         if(cancel&&cancel->load(std::memory_order_relaxed)){status="封面下载已取消";break;}
+         const auto elapsed=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-begin).count();
+-        if(!added[1]&&!done[1]&&(done[0]||elapsed>=800))start(1,origin);
++        if(!added[1]&&!done[1]&&(done[0]||elapsed>=0))start(1,origin);
+         int running=0;
+         if(curl_multi_perform(multi,&running)!=CURLM_OK){status="封面并行请求失败";break;}
+         int remaining=0;
+@@ -158,7 +158,7 @@ static bool download_movie_race(const ProxyConfig& proxy,const std::string& url,
+         if(winner>=0||denied||(done[0]&&done[1]))break;
+         if(done[0]&&!added[1]&&!done[1])continue;
+         int events=0;
+-        if(curl_multi_wait(multi,nullptr,0,50,&events)!=CURLM_OK){status="封面请求等待失败";break;}
++        if(curl_multi_wait(multi,nullptr,0,20,&events)!=CURLM_OK){status="封面请求等待失败";break;}
+     }
+     // Detach before closing files: no callback may retain a stack-owned writer.
+     for(int i=0;i<2;++i){
+@@ -523,8 +523,9 @@ static std::string safe_cache_component(const std::string& id) {
+ static int cover_decode_max_dim(const std::string& id) {
+     // Only the two network video feeds need the larger poster. Keep the
+     // anime endpoint at its previous 512px budget so startup stays light.
+-    const bool high_res = id.rfind("kanju:", 0) == 0 || id.rfind("rrtv:", 0) == 0;
+-    return high_res ? THUMB_CACHE_MAX_DIM : 512;
++    if (id.rfind("kanju:", 0) == 0) return 480;
++    if (id.rfind("rrtv:", 0) == 0) return THUMB_CACHE_MAX_DIM;
++    return 512;
+ }
+ 
+ bool cover_load_cached_or_download(const ProxyConfig& proxy,
