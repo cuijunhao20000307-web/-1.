@@ -66,6 +66,71 @@ jobs:
           sed -i 's/if(st.provider_ok)provider_exit();if(st.socket_ok)socketExit();/if(st.provider_ok)provider_exit();if(st.ssl_ok)sslExit();if(st.socket_ok)socketExit();/' animex-src/nxanime_source/main.cpp
           grep -n 'ssl_ok\|sslInitialize\|sslExit' animex-src/nxanime_source/main.cpp
 
+      - name: Speed up movie poster loading
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          main = Path("animex-src/nxanime_source/main.cpp")
+          s = main.read_text()
+          old = '''    // Selected cover first, then the other 11 visible covers.  This keeps
+    // D-pad navigation responsive even when an earlier image host is slow.
+    int selected_index=std::clamp(st.selected,begin,std::min(begin+11,(int)st.view.size()-1));
+    st.cover_load_items.push_back(st.items[st.view[selected_index]]);
+    st.cover_slots.push_back(HomeCoverSlot{});st.cover_slots.back().id=st.items[st.view[selected_index]].id;
+    for(int i=begin;i<std::min(begin+12,(int)st.view.size());++i){
+        if(i==selected_index)continue;
+        st.cover_load_items.push_back(st.items[st.view[i]]);
+        st.cover_slots.push_back(HomeCoverSlot{});
+        st.cover_slots.back().id=st.items[st.view[i]].id;
+    }
+'''
+          new = '''    // Load the selected poster first, then cards closest to it on the 6x2 grid.
+    // This makes the part of the movie page the user is actually looking at fill first.
+    int selected_index=std::clamp(st.selected,begin,std::min(begin+11,(int)st.view.size()-1));
+    std::vector<int> cover_order;
+    for(int i=begin;i<std::min(begin+12,(int)st.view.size());++i)cover_order.push_back(i);
+    const int selected_rel=selected_index-begin;
+    const int selected_row=selected_rel/6,selected_col=selected_rel%6;
+    std::stable_sort(cover_order.begin(),cover_order.end(),[&](int a,int b){
+        const int ar=(a-begin)/6,ac=(a-begin)%6,br=(b-begin)/6,bc=(b-begin)%6;
+        const int da=std::abs(ar-selected_row)*2+std::abs(ac-selected_col);
+        const int db=std::abs(br-selected_row)*2+std::abs(bc-selected_col);
+        if(da!=db)return da<db;
+        return a<b;
+    });
+    for(int i:cover_order){
+        st.cover_load_items.push_back(st.items[st.view[i]]);
+        st.cover_slots.push_back(HomeCoverSlot{});
+        st.cover_slots.back().id=st.items[st.view[i]].id;
+    }
+'''
+          if old not in s:
+              raise SystemExit("cover order block not found")
+          s=s.replace(old,new)
+          s=s.replace('const int cover_workers=provider_source_mode()==PROVIDER_SOURCE_KANJU?4:2;',
+                      'const int cover_workers=provider_source_mode()==PROVIDER_SOURCE_KANJU?5:2;')
+          main.write_text(s)
+
+          cover = Path("animex-src/nxanime_source/cover.cpp")
+          c = cover.read_text()
+          replacements = {
+              'Start the second route only when the CDN has taken 800ms.':'Start the second route after 350ms so a slow wrapper cannot hold the viewport.',
+              'CURLOPT_TIMEOUT,index==0?5L:4L':'CURLOPT_TIMEOUT,index==0?4L:3L',
+              'CURLOPT_LOW_SPEED_TIME,3L':'CURLOPT_LOW_SPEED_TIME,2L',
+              'CURLOPT_BUFFERSIZE,128L*1024L':'CURLOPT_BUFFERSIZE,256L*1024L',
+              'elapsed>=800':'elapsed>=350',
+              'curl_multi_wait(multi,nullptr,0,50,&events)':'curl_multi_wait(multi,nullptr,0,25,&events)',
+          }
+          for a,b in replacements.items():
+              if a not in c:
+                  raise SystemExit(f"missing cover optimization token: {a}")
+              c=c.replace(a,b,1)
+          cover.write_text(c)
+          PY
+          grep -n 'cover_workers\|cover_order\|elapsed>=350' animex-src/nxanime_source/main.cpp animex-src/nxanime_source/cover.cpp
+          grep -n 'CURLOPT_TIMEOUT\|CURLOPT_LOW_SPEED_TIME\|CURLOPT_BUFFERSIZE\|curl_multi_wait' animex-src/nxanime_source/cover.cpp | head -20
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
@@ -134,6 +199,6 @@ jobs:
       - name: Upload ANIMEX NRO
         uses: actions/upload-artifact@v4
         with:
-          name: ANIMEX-0.8.1-HTTPS-FIX
+          name: ANIMEX-0.8.1-FAST-COVERS
           path: animex-src/ANIMEX.nro
           if-no-files-found: error
