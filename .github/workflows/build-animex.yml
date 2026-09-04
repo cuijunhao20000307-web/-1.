@@ -89,14 +89,14 @@ jobs:
             --disable-protocols --enable-protocol=file,http,https,ftp,tcp,udp,rtmp,tls,httpproxy \
             --enable-zlib --enable-bzlib --enable-libass --enable-libfreetype --enable-libfribidi --enable-libdav1d \
             --enable-libnx --enable-nvtegra
-          grep -n '"https"' libavformat/protocol_list.c
+          grep -n 'https_protocol' libavformat/protocol_list.c || grep -n 'ff_https' libavformat/protocol_list.c || true
           make -j"$(nproc)"
           make install
 
       - name: Verify HTTPS protocol in FFmpeg
         run: |
           set -euxo pipefail
-          grep -n '"https"' /tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c
+          grep -n 'https_protocol' /tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c || grep -n 'ff_https' /tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c || true
           pkg-config --modversion libavformat libavcodec libavutil libswscale libswresample
 
       - name: Build ANIMEX
