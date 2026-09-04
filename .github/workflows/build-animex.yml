@@ -1,0 +1,78 @@
+name: Build ANIMEX NRO
+
+on:
+  push:
+    branches:
+      - animex-nro-build
+    paths:
+      - 'animex_payload/**'
+      - '.github/workflows/build-animex.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+      options: --user root
+
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+      PORTLIBS: /opt/devkitpro/portlibs/switch
+      LIBNX: /opt/devkitpro/libnx
+      PKG_CONFIG_PATH: /opt/devkitpro/portlibs/switch/lib/pkgconfig:/opt/devkitpro/libnx/lib/pkgconfig
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore ANIMEX source
+        run: |
+          set -euxo pipefail
+          test "$(find animex_payload -maxdepth 1 -name 'part*.b64' | wc -l)" -eq 19
+          cat animex_payload/part*.b64 > animex-source.tar.gz.b64
+          base64 -d animex-source.tar.gz.b64 > animex-source.tar.gz
+          echo "e95de0f5bb5a3886d56a95e4c28b5e34a2dfb5ffc9d808cc58b6a2075e0b47f6  animex-source.tar.gz" | sha256sum -c -
+          mkdir -p animex-src
+          tar -xzf animex-source.tar.gz -C animex-src
+          test -f animex-src/Makefile
+          test -f animex-src/icon.jpg
+          test -f animex-src/nxanime_source/main.cpp
+
+      - name: Install Switch libraries
+        run: |
+          set -euxo pipefail
+          dkp-pacman -Syu --noconfirm
+          dkp-pacman -S --needed --noconfirm             switch-dev             switch-pkg-config             switch-curl             switch-freetype             switch-libpng             switch-libjpeg-turbo             switch-libwebp             switch-sdl2             switch-ffmpeg
+
+      - name: Verify toolchain
+        run: |
+          set -euxo pipefail
+          aarch64-none-elf-g++ --version
+          which elf2nro
+          pkg-config --modversion freetype2 libcurl libpng libwebp sdl2 libavformat libavcodec libavutil libswscale libswresample
+
+      - name: Build ANIMEX
+        working-directory: animex-src
+        run: |
+          set -euxo pipefail
+          make -j"$(nproc)"
+
+      - name: Verify NRO
+        run: |
+          set -euxo pipefail
+          ls -lh animex-src/ANIMEX.nro
+          test -s animex-src/ANIMEX.nro
+          sha256sum animex-src/ANIMEX.nro
+
+      - name: Upload ANIMEX NRO
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANIMEX-0.8.1-fixed-nro
+          path: animex-src/ANIMEX.nro
+          if-no-files-found: error
