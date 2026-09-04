@@ -44,11 +44,26 @@ jobs:
           test -f animex-src/icon.jpg
           test -f animex-src/nxanime_source/main.cpp
 
-      - name: Install Switch libraries
+      - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
-          dkp-pacman -Syu --noconfirm
-          dkp-pacman -S --needed --noconfirm             switch-dev             switch-pkg-config             switch-curl             switch-freetype             switch-libpng             switch-libjpeg-turbo             switch-libwebp             switch-sdl2             switch-ffmpeg
+          required="switch-dev switch-pkg-config switch-curl switch-freetype switch-libpng switch-libjpeg-turbo switch-libwebp switch-sdl2 switch-ffmpeg"
+          missing=""
+          for p in $required; do
+            if ! dkp-pacman -Q "$p" >/dev/null 2>&1; then
+              missing="$missing $p"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Missing packages:$missing"
+            for i in 1 2 3; do
+              dkp-pacman -Sy --noconfirm && break || true
+              sleep 5
+            done
+            dkp-pacman -S --needed --noconfirm $missing
+          else
+            echo "All required Switch libraries are already present in the devkitPro image."
+          fi
 
       - name: Verify toolchain
         run: |
