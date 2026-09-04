@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          dkp-pacman -Sy --noconfirm
+          dkp-pacman -Sy --noconfirm || echo "::warning::devkitPro repo sync returned an error; continuing with the container cache"
           dkp-pacman -S --needed --noconfirm \
             switch-dev switch-pkg-config switch-curl switch-freetype \
             switch-libpng switch-libwebp switch-libjpeg-turbo \
