@@ -1,0 +1,73 @@
+name: Build ANIMEX NRO
+
+on:
+  push:
+    branches: [ animex-nro-build ]
+    paths:
+      - 'animex_payload/**'
+      - '.github/workflows/animex-nro.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+      options: --user root
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+      PORTLIBS: /opt/devkitpro/portlibs/switch
+      PATH: /opt/devkitpro/devkitA64/bin:/opt/devkitpro/tools/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      PKG_CONFIG_PATH: /opt/devkitpro/portlibs/switch/lib/pkgconfig
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reassemble ANIMEX source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat animex_payload/part*.b64 > animex-source.b64
+          base64 -d animex-source.b64 > animex-source.tar.gz
+          echo "e95de0f5bb5a3886d56a95e4c28b5e34a2dfb5ffc9d808cc58b6a2075e0b47f6  animex-source.tar.gz" | sha256sum -c -
+          mkdir -p animex-src
+          tar -xzf animex-source.tar.gz -C animex-src
+          test -f animex-src/Makefile
+          test -f animex-src/nxanime_source/main.cpp
+
+      - name: Install Switch dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          dkp-pacman -Sy --noconfirm
+          dkp-pacman -S --needed --noconfirm \
+            switch-dev switch-pkg-config switch-curl switch-freetype \
+            switch-libpng switch-libwebp switch-libjpeg-turbo \
+            switch-sdl2 switch-ffmpeg switch-zlib
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$DEVKITA64/bin/aarch64-none-elf-g++" --version
+          test -d "$DEVKITPRO/libnx"
+          ls "$PORTLIBS/lib/pkgconfig" | head
+
+      - name: Build ANIMEX
+        working-directory: animex-src
+        shell: bash
+        run: |
+          set -euxo pipefail
+          make clean || true
+          make -j$(nproc)
+          test -s ANIMEX.nro
+          ls -lh ANIMEX.nro
+
+      - name: Upload ANIMEX.nro
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANIMEX-0.8.1-NRO
+          path: animex-src/ANIMEX.nro
+          if-no-files-found: error
