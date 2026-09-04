@@ -44,6 +44,28 @@ jobs:
           test -f animex-src/icon.jpg
           test -f animex-src/nxanime_source/main.cpp
 
+      - name: Enable libnx SSL service for FFmpeg HTTPS
+        run: |
+          set -euxo pipefail
+          sed -i 's/bool socket_ok=false,provider_ok=false,connected=false;/bool socket_ok=false,ssl_ok=false,provider_ok=false,connected=false;/' animex-src/nxanime_source/main.cpp
+          awk '
+            { print }
+            /        st.socket_ok=true;/ { inject=1; next }
+            inject && /    }/ {
+              print "    if(!st.ssl_ok){"
+              print "        Result rc=sslInitialize(3);"
+              print "        if(R_FAILED(rc)){"
+              print "            char t[96];snprintf(t,sizeof(t),\"SSL INIT FAILED 0X%08X\",rc);"
+              print "            st.status=t;log_stage(st.status.c_str());return;"
+              print "        }"
+              print "        st.ssl_ok=true;"
+              print "    }"
+              inject=0
+            }
+          ' animex-src/nxanime_source/main.cpp > /tmp/main.cpp && mv /tmp/main.cpp animex-src/nxanime_source/main.cpp
+          sed -i 's/if(st.provider_ok)provider_exit();if(st.socket_ok)socketExit();/if(st.provider_ok)provider_exit();if(st.ssl_ok)sslExit();if(st.socket_ok)socketExit();/' animex-src/nxanime_source/main.cpp
+          grep -n 'ssl_ok\|sslInitialize\|sslExit' animex-src/nxanime_source/main.cpp
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
