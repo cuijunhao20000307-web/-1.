@@ -314,14 +314,21 @@ jobs:
             --disable-protocols --enable-protocol=file,http,https,ftp,tcp,udp,rtmp,tls,httpproxy \
             --enable-zlib --enable-bzlib --enable-libass --enable-libfreetype --enable-libfribidi --enable-libdav1d \
             --enable-libnx --enable-nvtegra
-          grep -n 'https_protocol' libavformat/protocol_list.c || grep -n 'ff_https' libavformat/protocol_list.c || true
+          grep -n 'ff_https_protocol\|ff_crypto_protocol\|ff_data_protocol' libavformat/protocol_list.c
           make -j"$(nproc)"
           make install
 
-      - name: Verify HTTPS protocol in FFmpeg
+      - name: Verify streaming protocols in FFmpeg
         run: |
           set -euxo pipefail
-          grep -n 'https_protocol' /tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c || grep -n 'ff_https' /tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c || true
+          proto=/tmp/ffmpeg-build/ffmpeg-7.1/libavformat/protocol_list.c
+          grep -n 'ff_http_protocol' "$proto"
+          grep -n 'ff_https_protocol' "$proto"
+          grep -n 'ff_crypto_protocol' "$proto"
+          grep -n 'ff_data_protocol' "$proto"
+          grep -n 'ff_tcp_protocol' "$proto"
+          grep -n 'ff_tls_protocol' "$proto"
+          grep -n 'ff_httpproxy_protocol' "$proto"
           pkg-config --modversion libavformat libavcodec libavutil libswscale libswresample
 
       - name: Build ANIMEX
