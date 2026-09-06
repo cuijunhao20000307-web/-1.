@@ -51,6 +51,13 @@ jobs:
           cp animex_payload/dev_icon.jpg animex-src/icon.jpg
           sha256sum animex-src/icon.jpg
 
+      - name: Set ANIMEX version 0.8.3
+        run: |
+          set -euxo pipefail
+          cd animex-src
+          grep -RIl '0\.8\.1' . | xargs -r sed -i 's/0\.8\.1/0.8.3/g'
+          grep -RIn '0\.8\.3' . | head -30 || true
+
       - name: Enable libnx SSL service for FFmpeg HTTPS
         run: |
           set -euxo pipefail
@@ -246,6 +253,20 @@ jobs:
             animex-src/SOURCE_BUILD_INFO.txt
             animex-src/icon.jpg
             animex-src/nxanime_source/**
+          if-no-files-found: error
+
+      - name: Package ANIMEX 0.8.3 source
+        run: |
+          set -euxo pipefail
+          cp -a animex-src ANIMEX-0.8.3-source
+          rm -f ANIMEX-0.8.3-source/ANIMEX.nro ANIMEX-0.8.3-source/ANIMEX.elf
+          tar -czf ANIMEX-0.8.3-source.tar.gz ANIMEX-0.8.3-source
+
+      - name: Upload ANIMEX 0.8.3 source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANIMEX-0.8.3-source
+          path: ANIMEX-0.8.3-source.tar.gz
           if-no-files-found: error
 
       - name: Ensure Switch libraries
