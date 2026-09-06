@@ -144,23 +144,21 @@ jobs:
           # buffering and audio detection enabled for extensionless CDN links.
           p = root / "nxanime_source/player.cpp"
           s = p.read_text()
-          old = """    const bool online_video_smooth = !anime_cdn &&
-              (source.hls || source.referer.find("mh.yichengwlkj.com") != std::string::npos);"""
-          new = """    const bool online_video_smooth = !anime_cdn &&
-              (source.movie || source.hls ||
-               source.referer.find("mh.yichengwlkj.com") != std::string::npos);"""
-          if old not in s:
+          import re
+          s, n = re.subn(
+              r'(const bool online_video_smooth\s*=\s*!anime_cdn\s*&&\s*\()source\.hls\s*\|\|',
+              r'\\1source.movie || source.hls ||',
+              s, count=1)
+          if n == 0 and "source.movie || source.hls" not in s:
               raise SystemExit("player smooth-stream target not found")
-          s = s.replace(old, new, 1)
-          old = """    if (request.user_agent.empty())
-              request.user_agent = "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";"""
-          new = """    if (request.user_agent.empty())
-              request.user_agent = source.movie
+          ua_old = 'request.user_agent = "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";'
+          ua_new = '''request.user_agent = source.movie
                   ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                  : "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";"""
-          if old not in s:
+                  : "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";'''
+          if ua_old in s:
+              s = s.replace(ua_old, ua_new, 1)
+          elif "source.movie" not in s or "Chrome/126.0.0.0" not in s:
               raise SystemExit("player UA target not found")
-          s = s.replace(old, new, 1)
           # Validated movie lines do not need a 15s open stall before failover.
           s = s.replace("now_ns() + (source.movie ? 15'000'000'000ULL : 30'000'000'000ULL)",
                         "now_ns() + (source.movie ? 12'000'000'000ULL : 30'000'000'000ULL)", 1)
