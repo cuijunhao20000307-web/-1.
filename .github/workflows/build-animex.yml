@@ -182,6 +182,12 @@ jobs:
           python3 animex_payload/add_javday_source.py animex-src
           grep -RIn 'PROVIDER_SOURCE_JAVDAY\|javday.app\|webapp://' animex-src/nxanime_source | head -80
 
+      - name: Fix JAVDAY native playback covers categories and PIN
+        run: |
+          set -euxo pipefail
+          python3 animex_payload/javday_native_fix_v2.py animex-src
+          grep -RIn 'JAVDAY_FILTER_CHANNELS\|javday_pin_prompt\|background-image\|special_movie\|javday_cover' animex-src/nxanime_source | head -120
+
       - name: Apply developer version label
         run: |
           set -euxo pipefail
