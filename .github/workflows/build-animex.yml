@@ -182,6 +182,32 @@ jobs:
           python3 animex_payload/add_javday_source.py animex-src
           grep -RIn 'PROVIDER_SOURCE_JAVDAY\|javday.app\|webapp://' animex-src/nxanime_source | head -80
 
+      - name: Apply developer version label
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("animex-src")
+
+          # Keep NACP/build metadata ASCII and short for Switch compatibility.
+          p = root / "Makefile"
+          s = p.read_text()
+          s = s.replace("APP_VERSION := 0.8.3", "APP_VERSION := 0.8.3-dev")
+          p.write_text(s)
+
+          # User-facing version string requested by the developer.
+          p = root / "nxanime_source/main.cpp"
+          s = p.read_text()
+          s = s.replace('"V.0.8.3"', '"v.开发者版本"')
+          s = s.replace('"v0.8.3 · 多源代理启动器"', '"v.开发者版本 · 多源代理启动器"')
+          s = s.replace('"0.8.3 SOURCE LAUNCHER"', '"开发者版本 SOURCE LAUNCHER"')
+          s = s.replace('"v0.8.3"', '"v.开发者版本"')
+          s = s.replace('"ANIMEX 0.8.3 startup\\n"', '"ANIMEX 开发者版本 startup\\n"')
+          p.write_text(s)
+          PY
+          grep -n '开发者版本\|APP_VERSION' animex-src/nxanime_source/main.cpp animex-src/Makefile | head -40
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
@@ -250,6 +276,6 @@ jobs:
       - name: Upload ANIMEX NRO
         uses: actions/upload-artifact@v4
         with:
-          name: ANIMEX-0.8.3-JAVDAY
+          name: ANIMEX-DEVELOPER
           path: animex-src/ANIMEX.nro
           if-no-files-found: error
