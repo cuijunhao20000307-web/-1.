@@ -75,6 +75,14 @@ jobs:
           grep -n 'cover_workers' nxanime_source/main.cpp
           grep -n 'elapsed>=0\|return 480' nxanime_source/cover.cpp
 
+      - name: Apply broader movie playback compatibility
+        run: |
+          set -euxo pipefail
+          cd animex-src
+          patch -p1 < ../animex_payload/greenbook-playback-compat.patch
+          grep -n 'KANJU_YJ_BASE\|kanju_api_post\|resolve-line' nxanime_source/provider.cpp
+          grep -n 'json_http_url' nxanime_source/media_resolver.cpp
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
@@ -143,6 +151,6 @@ jobs:
       - name: Upload ANIMEX NRO
         uses: actions/upload-artifact@v4
         with:
-          name: ANIMEX-0.8.1-MOVIE-FIX
+          name: ANIMEX-0.8.1-GREENBOOK-COMPAT
           path: animex-src/ANIMEX.nro
           if-no-files-found: error
