@@ -31,14 +31,14 @@ s = must_replace(
     s,
     '    if (g_source_mode == PROVIDER_SOURCE_KANJU) return "在线电影 · 电影/剧集";',
     '    if (g_source_mode == PROVIDER_SOURCE_KANJU) return "在线电影 · 电影/剧集";\n'
-    '    if (g_source_mode == PROVIDER_SOURCE_JAVDAY) return "JAVDAY · 原生播放端";',
+    '    if (g_source_mode == PROVIDER_SOURCE_JAVDAY) return "成人专区🔞";',
     "source name")
 
 s = must_replace(
     s,
     '    if (g_source_mode == PROVIDER_SOURCE_KANJU) return "分类：电影 / 剧集 / 动漫 / 综艺 / 短剧";',
     '    if (g_source_mode == PROVIDER_SOURCE_KANJU) return "分类：电影 / 剧集 / 动漫 / 综艺 / 短剧";\n'
-    '    if (g_source_mode == PROVIDER_SOURCE_JAVDAY) return "分类：首页 / 最近更新 · 支持番号搜索";',
+    '    if (g_source_mode == PROVIDER_SOURCE_JAVDAY) return "成人专区🔞 · 首页 / 分类 / 番号搜索";',
     "source endpoint")
 
 s = must_replace(
@@ -380,7 +380,7 @@ s = must_replace(
         continuation.has_more = false;
         continuation.page = 2;
         continuation.offset = 1;
-        status = "JAVDAY 搜索完成 · 1 条";
+        status = "成人专区🔞 · 搜索完成 · 1 条";
         return true;
     }""",
     "search page branch")
@@ -398,7 +398,7 @@ s = must_replace(
         AnimeItem item;
         if (!javday_fetch_exact(proxy, query, item, status)) return false;
         out.push_back(std::move(item));
-        status = "JAVDAY 番号搜索 · 1 条";
+        status = "成人专区🔞 · 番号搜索 · 1 条";
         return true;
     }""",
     "search branch")
@@ -437,14 +437,14 @@ s = must_replace(
         out.id = item.id;
         out.title = javday_title_from_html(html);
         if (out.title.empty()) out.title = item.title;
-        out.status = "JAVDAY 原生播放端";
+        out.status = "成人专区🔞";
         out.description = javday_meta(html, "description");
         out.url = item.url;
         out.cover_url = javday_meta(html, "og:image");
         if (out.cover_url.empty()) out.cover_url = item.cover_url;
         std::string slug = item.id.substr(std::strlen("javday:"));
         out.episodes.push_back({"播放", "javday://play/" + slug});
-        status = "JAVDAY 详情完成 · 1 个播放入口";
+        status = "成人专区🔞 · 详情完成";
         return true;
     }""",
     "detail branch")
@@ -521,6 +521,6 @@ s = must_replace(
 s = must_replace(
     s,
     'safe_text(b,s,210,184,2,provider_source_mode()==1?"ONLINE VIDEO":provider_source_mode()==2?"CUSTOM DATA":provider_source_mode()==3?"ONLINE MOVIE 2":"ONLINE ANIME",white);',
-    'safe_text(b,s,210,184,2,provider_source_mode()==1?"ONLINE VIDEO":provider_source_mode()==2?"CUSTOM DATA":provider_source_mode()==3?"ONLINE MOVIE 2":provider_source_mode()==4?"JAVDAY NATIVE":"ONLINE ANIME",white);',
+    'safe_text(b,s,210,184,2,provider_source_mode()==1?"ONLINE VIDEO":provider_source_mode()==2?"CUSTOM DATA":provider_source_mode()==3?"ONLINE MOVIE 2":provider_source_mode()==4?"成人专区🔞":"ONLINE ANIME",white);',
     "launcher label")
 p.write_text(s)
