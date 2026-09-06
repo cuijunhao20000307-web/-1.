@@ -329,6 +329,7 @@ jobs:
           grep -n 'ff_tcp_protocol' "$proto"
           grep -n 'ff_tls_protocol' "$proto"
           grep -n 'ff_httpproxy_protocol' "$proto"
+          echo "Required streaming protocols are present."
           pkg-config --modversion libavformat libavcodec libavutil libswscale libswresample
 
       - name: Build ANIMEX
