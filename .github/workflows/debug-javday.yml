@@ -91,16 +91,50 @@ jobs:
               if p>=0: print(raw[max(0,p-900):p+1600])
           PY
 
-          echo '--- ANIMEX special resolver call path ---'
-          git clone --depth 1 --branch animex-nro-build https://github.com/cuijunhao20000307-web/-1.git /tmp/animex-repo
-          cd /tmp/animex-repo
-          cat animex_payload/part*.b64 > /tmp/animex-source.tar.gz.b64
-          base64 -d /tmp/animex-source.tar.gz.b64 > /tmp/animex-source.tar.gz
-          mkdir -p /tmp/animex-src
-          tar -xzf /tmp/animex-source.tar.gz -C /tmp/animex-src
-          cd /tmp/animex-src
-          patch -p1 < /tmp/animex-repo/animex_payload/movie-play-cover-fix.patch >/dev/null
-          patch -p1 < /tmp/animex-repo/animex_payload/greenbook-playback-compat.patch >/dev/null
-          python3 /tmp/animex-repo/animex_payload/add_javday_source.py /tmp/animex-src
-          grep -RIn -C 8 'provider_resolve_special_episode' nxanime_source || true
-          grep -RIn -C 8 'kanju://play/\|javday://play/' nxanime_source || true
+          echo '--- live JAVDAY media and cover probes ---'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          home=Path('/tmp/jd/home.html').read_text(errors='replace')
+          detail=Path('/tmp/jd/videos_START551_.html').read_text(errors='replace')
+          m=re.search(r'https?[^"\\'<>\\\\\\s]+?\\.m3u8[^"\\'<>\\\\\\s]*',detail,re.I)
+          if m: Path('/tmp/jd/media_url.txt').write_text(m.group(0).replace('\\/','/').replace('&amp;','&'))
+          m=re.search(r'background-image:\\s*url\\(([^)]+)\\)',home,re.I)
+          if m:
+              u=m.group(1).strip().strip('"\\'')
+              if u.startswith('/'): u='https://javday.app'+u
+              Path('/tmp/jd/cover_url.txt').write_text(u)
+          PY
+
+          if [ -s /tmp/jd/cover_url.txt ]; then
+            COVER=$(cat /tmp/jd/cover_url.txt)
+            echo "COVER=$COVER"
+            curl -L --max-time 20 -A "$UA" -e 'https://javday.app/' \
+              -o /dev/null -w 'COVER HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download} FINAL=%{url_effective}\n' "$COVER" || true
+          fi
+
+          if [ -s /tmp/jd/media_url.txt ]; then
+            MEDIA=$(cat /tmp/jd/media_url.txt)
+            echo "MEDIA=$MEDIA"
+            curl -L --max-time 20 -A "$UA" -e 'https://javday.app/videos/START551/' \
+              -D /tmp/jd/media.headers -o /tmp/jd/index.m3u8 \
+              -w 'MEDIA HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download} FINAL=%{url_effective}\n' "$MEDIA" || true
+            head -30 /tmp/jd/index.m3u8 || true
+            python3 - <<'PY'
+          from pathlib import Path
+          from urllib.parse import urljoin
+          if Path('/tmp/jd/media_url.txt').exists() and Path('/tmp/jd/index.m3u8').exists():
+              base=Path('/tmp/jd/media_url.txt').read_text().strip()
+              for line in Path('/tmp/jd/index.m3u8').read_text(errors='replace').splitlines():
+                  line=line.strip()
+                  if line and not line.startswith('#'):
+                      Path('/tmp/jd/segment_url.txt').write_text(urljoin(base,line))
+                      break
+          PY
+            if [ -s /tmp/jd/segment_url.txt ]; then
+              SEG=$(cat /tmp/jd/segment_url.txt)
+              echo "SEGMENT=$SEG"
+              curl -L --max-time 20 -A "$UA" -e 'https://javday.app/videos/START551/' \
+                -o /dev/null -w 'SEG HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download} FINAL=%{url_effective}\n' "$SEG" || true
+            fi
+          fi
