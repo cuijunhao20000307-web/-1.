@@ -257,7 +257,7 @@ static bool javday_pin_prompt(State& st){
     SwkbdConfig k{};
     if(R_FAILED(swkbdCreate(&k,0))){st.status="成人专区 PIN 键盘启动失败";return false;}
     swkbdConfigMakePresetPassword(&k);
-    swkbdConfigSetHeaderText(&k,"成人专区🔞 PIN");
+    swkbdConfigSetHeaderText(&k,"成人专区 PIN");
     swkbdConfigSetGuideText(&k,"请输入开发者 PIN");
     swkbdConfigSetStringLenMin(&k,3);
     swkbdConfigSetStringLenMax(&k,3);
