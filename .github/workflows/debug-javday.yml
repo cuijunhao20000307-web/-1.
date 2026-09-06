@@ -80,3 +80,27 @@ jobs:
 
           echo '--- header summaries ---'
           grep -EHi '^(HTTP/|content-type:|location:|server:|cf-|set-cookie:)' /tmp/jd/*.headers || true
+          echo '--- homepage poster structure ---'
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          raw=Path('/tmp/jd/home.html').read_text(errors='replace')
+          for needle in ['/videos/IPZZ916/','/upload/vod/','data-original','data-src','background-image','lazyload']:
+              p=raw.find(needle)
+              print('\nNEEDLE',needle,'POS',p)
+              if p>=0: print(raw[max(0,p-900):p+1600])
+          PY
+
+          echo '--- ANIMEX special resolver call path ---'
+          git clone --depth 1 --branch animex-nro-build https://github.com/cuijunhao20000307-web/-1.git /tmp/animex-repo
+          cd /tmp/animex-repo
+          cat animex_payload/part*.b64 > /tmp/animex-source.tar.gz.b64
+          base64 -d /tmp/animex-source.tar.gz.b64 > /tmp/animex-source.tar.gz
+          mkdir -p /tmp/animex-src
+          tar -xzf /tmp/animex-source.tar.gz -C /tmp/animex-src
+          cd /tmp/animex-src
+          patch -p1 < /tmp/animex-repo/animex_payload/movie-play-cover-fix.patch >/dev/null
+          patch -p1 < /tmp/animex-repo/animex_payload/greenbook-playback-compat.patch >/dev/null
+          python3 /tmp/animex-repo/animex_payload/add_javday_source.py /tmp/animex-src
+          grep -RIn -C 8 'provider_resolve_special_episode' nxanime_source || true
+          grep -RIn -C 8 'kanju://play/\|javday://play/' nxanime_source || true
