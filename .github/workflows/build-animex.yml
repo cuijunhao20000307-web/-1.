@@ -147,7 +147,7 @@ jobs:
           import re
           s, n = re.subn(
               r'(const bool online_video_smooth\s*=\s*!anime_cdn\s*&&\s*\()source\.hls\s*\|\|',
-              r'\\1source.movie || source.hls ||',
+              r'\1source.movie || source.hls ||',
               s, count=1)
           if n == 0 and "source.movie || source.hls" not in s:
               raise SystemExit("player smooth-stream target not found")
