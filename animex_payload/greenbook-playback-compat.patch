@@ -72,22 +72,31 @@
 +    curl_easy_setopt(c, CURLOPT_REFERER, "https://kanju1.com/");
 +    curl_easy_setopt(c, CURLOPT_USERAGENT,
 +                     "Mozilla/5.0 (Nintendo Switch; ANIMEX/0.8.1) AppleWebKit/537.36");
++    NetworkOptions options;
++    options.connect_timeout_seconds = 4;
++    options.total_timeout_seconds = 10;
++    options.low_speed_seconds = 4;
++    options.max_attempts = 1;
++    options.network_mode = 0;
++    options.allow_ipv4_fallback = proxy.mode == PROXY_MODE_DIRECT;
++    network_apply_common(c, options);
++    network_apply_proxy(c, proxy);
++    // network_apply_common() selects GET, so POST must be selected afterwards.
 +    curl_easy_setopt(c, CURLOPT_POST, 1L);
 +    curl_easy_setopt(c, CURLOPT_POSTFIELDS, payload.c_str());
 +    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)payload.size());
 +    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
 +    curl_easy_setopt(c, CURLOPT_WRITEDATA, &body);
-+    NetworkOptions options;
-+    options.network_mode = proxy.network_mode;
-+    options.allow_ipv4_fallback = proxy.mode == PROXY_MODE_DIRECT;
-+    network_apply_proxy(c, proxy);
-+    const NetworkResult result = network_perform_get(
-+        c, VideoNetworkStage::Api, reset_string_response, &body, options,
-+        g_provider_cancel);
++    char error_buffer[CURL_ERROR_SIZE] = {0};
++    curl_easy_setopt(c, CURLOPT_ERRORBUFFER, error_buffer);
++    const CURLcode rc = curl_easy_perform(c);
++    long http = 0;
++    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http);
 +    curl_slist_free_all(headers);
 +    curl_easy_cleanup(c);
-+    if (!result.success()) {
-+        status = std::string("在线电影端二次解析失败：") + result.error;
++    if (rc != CURLE_OK || http < 200 || http >= 400) {
++        status = std::string("在线电影端二次解析失败：") +
++            (error_buffer[0] ? error_buffer : curl_easy_strerror(rc));
 +        return false;
 +    }
 +    if (body.empty() || body.front() != '{') {
@@ -148,7 +157,14 @@
      const std::string lines = kanju_array(body, "line_options");
      int best_weight = -1;
      std::string best_url, best_label;
-+    std::vector<std::pair<int, std::string>> resolver_tickets;
++    struct ResolverTicket {
++        int weight = 0;
++        std::string ticket;
++        std::string line;
++        std::string provider_id;
++        std::string play_from;
++    };
++    std::vector<ResolverTicket> resolver_tickets;
      for (const std::string& line : json_array_objects(lines)) {
 -        const std::string url = kanju_field(line, "url");
 -        if(rejected&&std::find(rejected->begin(),rejected->end(),url)!=rejected->end())continue;
@@ -164,12 +180,20 @@
 +        if (url.empty()) continue;
          if (std::atoi(kanju_field(line, "minimum_user_level").c_str()) > 0) continue;
          const int weight = std::atoi(kanju_field(line, "preference_weight").c_str());
-+        const bool needs_resolve = starts_with(url, "resolve://") ||
++        const std::string url_kind = kanju_field(line, "url_kind");
++        const bool needs_resolve = url_kind == "resolve_ticket" ||
++            starts_with(url, "resolve://") ||
 +            kanju_field(line, "resolve_required") == "true" ||
 +            kanju_field(line, "resolved") == "false";
 +        if (needs_resolve) {
 +            if (starts_with(url, "resolve://")) url = url.substr(std::strlen("resolve://"));
-+            if (!url.empty()) resolver_tickets.push_back({weight, url});
++            if (!url.empty()) resolver_tickets.push_back({
++                weight,
++                url,
++                kanju_field(line, "playback_source_id"),
++                kanju_field(line, "provider_id"),
++                kanju_field(line, "play_from")
++            });
 +            continue;
 +        }
 +        // Do not require a .m3u8/.mp4 suffix here: signed CDN URLs may be
@@ -188,19 +212,23 @@
 -        return false;
 +    if (!best_url.empty()) {
 +        media_url = best_url;
-+        referer.clear();
++        referer = "https://kanju1.com/";
 +        status = "在线电影端公开线路已刷新";
 +        if (!best_label.empty()) status += " · " + best_label;
 +        return true;
 +    }
 +
 +    std::sort(resolver_tickets.begin(), resolver_tickets.end(),
-+              [](const auto& a, const auto& b) { return a.first > b.first; });
++              [](const auto& a, const auto& b) { return a.weight > b.weight; });
 +    for (const auto& candidate : resolver_tickets) {
-+        const std::string& ticket = candidate.second;
++        const std::string& ticket = candidate.ticket;
 +        const std::string ticket_key = "resolve://" + ticket;
 +        if (was_rejected(ticket_key)) continue;
-+        const std::string payload = "{\"ticket\":\"" + kanju_json_string(ticket) + "\"}";
++        const std::string payload =
++            "{\"ticket\":\"" + kanju_json_string(ticket) +
++            "\",\"line\":\"" + kanju_json_string(candidate.line) +
++            "\",\"provider_id\":\"" + kanju_json_string(candidate.provider_id) +
++            "\",\"play_from\":\"" + kanju_json_string(candidate.play_from) + "\"}";
 +        std::string resolved_body, resolve_status;
 +        if (!kanju_api_post(proxy, "/v1/playback/resolve-line", payload,
 +                            resolved_body, resolve_status)) continue;
@@ -210,7 +238,7 @@
 +            !starts_with(resolved_url, "http://")) continue;
 +        if (was_rejected(resolved_url)) continue;
 +        media_url = resolved_url;
-+        referer.clear();
++        referer = "https://kanju1.com/";
 +        status = "在线电影端二次解析线路已刷新";
 +        return true;
      }
