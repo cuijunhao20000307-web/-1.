@@ -221,6 +221,33 @@ jobs:
           PY
           grep -n '开发者版本\|APP_VERSION' animex-src/nxanime_source/main.cpp animex-src/Makefile | head -40
 
+      - name: Package assembled developer source
+        run: |
+          set -euxo pipefail
+          cat > animex-src/SOURCE_BUILD_INFO.txt <<'EOF'
+          ANIMEX v.开发者版本
+          Developer: LINKO
+          Adult frontend name: 成人专区🔞
+          Internal provider id/protocol: JAVDAY (kept for compatibility)
+          Adult zone PIN: SEX
+          This source tree is the assembled source after all current build-time patches/transforms.
+          EOF
+          rm -f animex-src/ANIMEX.nro animex-src/ANIMEX.elf animex-src/ANIMEX.map
+          find animex-src -maxdepth 2 -type f | sort | sed -n '1,120p'
+
+      - name: Upload assembled source
+        uses: actions/upload-artifact@v4
+        with:
+          name: ANIMEX-DEVELOPER-SOURCE
+          path: |
+            animex-src/Makefile
+            animex-src/FFMPEG_HTTPS_FLAGS.txt
+            animex-src/BUILD_NOTES.txt
+            animex-src/SOURCE_BUILD_INFO.txt
+            animex-src/icon.jpg
+            animex-src/nxanime_source/**
+          if-no-files-found: error
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
