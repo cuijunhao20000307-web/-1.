@@ -1,0 +1,82 @@
+name: Debug JAVDAY native source
+
+on:
+  push:
+    branches:
+      - animex-nro-build
+    paths:
+      - '.github/workflows/debug-javday.yml'
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect public JAVDAY HTML and media metadata
+        shell: bash
+        run: |
+          set -euxo pipefail
+          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+          mkdir -p /tmp/jd
+          for url in             'https://javday.app/'             'https://javday.app/videos/START551/'             'https://javday.app/videos/START-551/'; do
+            name=$(echo "$url" | sed 's#https://javday.app/##;s#[^A-Za-z0-9]#_#g')
+            [ -n "$name" ] || name=home
+            curl -L --max-time 20 -A "$UA" -e 'https://javday.app/'               -D "/tmp/jd/$name.headers" -o "/tmp/jd/$name.html"               -w "URL=$url HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download} FINAL=%{url_effective}\n"               "$url" || true
+          done
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          from urllib.parse import urljoin
+          import re, json
+
+          class P(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.a=[]; self.img=[]; self.meta=[]; self.source=[]; self.video=[]; self.script=[]
+              def handle_starttag(self, tag, attrs):
+                  d=dict(attrs)
+                  if tag=='a': self.a.append(d)
+                  elif tag=='img': self.img.append(d)
+                  elif tag=='meta': self.meta.append(d)
+                  elif tag=='source': self.source.append(d)
+                  elif tag=='video': self.video.append(d)
+                  elif tag=='script': self.script.append(d)
+
+          for path in sorted(Path('/tmp/jd').glob('*.html')):
+              raw=path.read_text(errors='replace')
+              p=P()
+              try: p.feed(raw)
+              except Exception as e: print('PARSE_ERR',path.name,repr(e))
+              print('\n###',path.name,'len',len(raw))
+              vids=[x.get('href','') for x in p.a if '/videos/' in x.get('href','')]
+              print('video_href_count',len(vids),'first',vids[:5])
+              imgs=[]
+              for x in p.img:
+                  u=x.get('data-src') or x.get('data-original') or x.get('src') or ''
+                  if u: imgs.append(urljoin('https://javday.app/',u))
+              print('img_count',len(imgs),'first',imgs[:5])
+              og=[x.get('content','') for x in p.meta if (x.get('property') or x.get('name')) in ('og:image','og:title','description')]
+              print('meta_samples',og[:5])
+              srcs=[]
+              for x in p.source+p.video:
+                  for k in ('src','data-src'):
+                      if x.get(k): srcs.append(urljoin('https://javday.app/',x[k]))
+              print('source_video_urls',srcs[:10])
+              media=re.findall(r'https?[^"\'<>\\\s]+?(?:\.m3u8|\.mp4|\.m4v)(?:[^"\'<>\\\s]*)?',raw,re.I)
+              print('literal_media_count',len(media),'first',media[:5])
+              print('script_src_first',[urljoin('https://javday.app/',x.get('src')) for x in p.script if x.get('src')][:10])
+
+              # Persist the first image URL from homepage for the shell probe.
+              if path.name=='home.html' and imgs:
+                  Path('/tmp/jd/first_image.txt').write_text(imgs[0])
+          PY
+
+          if [ -s /tmp/jd/first_image.txt ]; then
+            IMG=$(cat /tmp/jd/first_image.txt)
+            echo "FIRST_IMAGE=$IMG"
+            curl -L --max-time 20 -A "$UA" -e 'https://javday.app/'               -o /dev/null -w 'IMAGE HTTP=%{http_code} TYPE=%{content_type} SIZE=%{size_download} FINAL=%{url_effective}\n' "$IMG" || true
+          fi
+
+          echo '--- header summaries ---'
+          grep -EHi '^(HTTP/|content-type:|location:|server:|cf-|set-cookie:)' /tmp/jd/*.headers || true
