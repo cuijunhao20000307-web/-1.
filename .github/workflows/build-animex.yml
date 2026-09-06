@@ -49,7 +49,6 @@ jobs:
           set -euxo pipefail
           test -s animex_payload/dev_icon.jpg
           cp animex_payload/dev_icon.jpg animex-src/icon.jpg
-          file animex-src/icon.jpg
           sha256sum animex-src/icon.jpg
 
       - name: Enable libnx SSL service for FFmpeg HTTPS
