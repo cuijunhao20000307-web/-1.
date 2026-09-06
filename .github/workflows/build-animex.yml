@@ -83,6 +83,101 @@ jobs:
           grep -n 'KANJU_YJ_BASE\|kanju_api_post\|resolve-line' nxanime_source/provider.cpp
           grep -n 'json_http_url' nxanime_source/media_resolver.cpp
 
+      - name: Apply ANIMEX 0.8.3 stability and speed tuning
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("animex-src")
+          # Version: UI, NACP metadata, startup log and HTTP UA tags.
+          for rel in ["Makefile", "nxanime_source/main.cpp", "nxanime_source/provider.cpp",
+                      "nxanime_source/media_resolver.cpp", "nxanime_source/cover.cpp"]:
+              p = root / rel
+              s = p.read_text()
+              s = s.replace("0.8.1", "0.8.3")
+              p.write_text(s)
+
+          # KANJU API: fail faster on a dead edge instead of inheriting 30-40s
+          # carrier budgets. Two attempts still retain IPv4 fallback.
+          p = root / "nxanime_source/provider.cpp"
+          s = p.read_text()
+          old = """    NetworkOptions options;
+              options.network_mode = proxy.network_mode;
+              options.allow_ipv4_fallback = proxy.mode == PROXY_MODE_DIRECT;
+              network_apply_proxy(c, proxy);
+              const NetworkResult result = network_perform_get(
+                  c, VideoNetworkStage::Api, reset_string_response, &body, options,
+                  g_provider_cancel);"""
+          new = """    NetworkOptions options;
+              options.connect_timeout_seconds = 4;
+              options.total_timeout_seconds = 10;
+              options.low_speed_seconds = 4;
+              options.max_attempts = 2;
+              options.network_mode = 0;
+              options.allow_ipv4_fallback = proxy.mode == PROXY_MODE_DIRECT;
+              options.user_agent =
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+              network_apply_proxy(c, proxy);
+              const NetworkResult result = network_perform_get(
+                  c, VideoNetworkStage::Api, reset_string_response, &body, options,
+                  g_provider_cancel);"""
+          if old not in s:
+              raise SystemExit("KANJU GET tuning target not found")
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # Movie probe: a bad line should be abandoned quickly so the next
+          # resolver candidate can be tried instead of freezing the UI.
+          p = root / "nxanime_source/media_resolver.cpp"
+          s = p.read_text()
+          s = s.replace("options.connect_timeout_seconds = 4;\n    options.total_timeout_seconds = 7;\n    options.low_speed_seconds = 3;",
+                        "options.connect_timeout_seconds = 3;\n    options.total_timeout_seconds = 5;\n    options.low_speed_seconds = 2;", 1)
+          s = s.replace(
+              '"Mozilla/5.0 (Nintendo Switch; ANIMEX/0.8.3) AppleWebKit/537.36"',
+              '"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"')
+          p.write_text(s)
+
+          # Treat every movie as an online smooth-stream source even when the
+          # resolved URL has no .m3u8 suffix. This keeps deeper probing,
+          # buffering and audio detection enabled for extensionless CDN links.
+          p = root / "nxanime_source/player.cpp"
+          s = p.read_text()
+          old = """    const bool online_video_smooth = !anime_cdn &&
+              (source.hls || source.referer.find("mh.yichengwlkj.com") != std::string::npos);"""
+          new = """    const bool online_video_smooth = !anime_cdn &&
+              (source.movie || source.hls ||
+               source.referer.find("mh.yichengwlkj.com") != std::string::npos);"""
+          if old not in s:
+              raise SystemExit("player smooth-stream target not found")
+          s = s.replace(old, new, 1)
+          old = """    if (request.user_agent.empty())
+              request.user_agent = "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";"""
+          new = """    if (request.user_agent.empty())
+              request.user_agent = source.movie
+                  ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                  : "Mozilla/5.0 (Nintendo Switch; ANIMEX) AppleWebKit/537.36";"""
+          if old not in s:
+              raise SystemExit("player UA target not found")
+          s = s.replace(old, new, 1)
+          # Validated movie lines do not need a 15s open stall before failover.
+          s = s.replace("now_ns() + (source.movie ? 15'000'000'000ULL : 30'000'000'000ULL)",
+                        "now_ns() + (source.movie ? 12'000'000'000ULL : 30'000'000'000ULL)", 1)
+          p.write_text(s)
+
+          # Six workers each racing two CDNs can create 12 simultaneous sockets.
+          # Keep six visible workers, but stagger the backup CDN very slightly
+          # to improve real-world throughput and stability on Switch Wi-Fi.
+          p = root / "nxanime_source/cover.cpp"
+          s = p.read_text()
+          s = s.replace("elapsed>=0", "elapsed>=120", 1)
+          p.write_text(s)
+          PY
+          grep -RIn '0.8.3' animex-src/Makefile animex-src/nxanime_source/main.cpp | head -20
+          grep -n 'source.movie || source.hls' animex-src/nxanime_source/player.cpp
+          grep -n 'elapsed>=120' animex-src/nxanime_source/cover.cpp
+
       - name: Ensure Switch libraries
         run: |
           set -euxo pipefail
@@ -151,6 +246,6 @@ jobs:
       - name: Upload ANIMEX NRO
         uses: actions/upload-artifact@v4
         with:
-          name: ANIMEX-0.8.1-GREENBOOK-COMPAT
+          name: ANIMEX-0.8.3
           path: animex-src/ANIMEX.nro
           if-no-files-found: error
