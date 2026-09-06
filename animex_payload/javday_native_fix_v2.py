@@ -255,9 +255,9 @@ keyboard_line = r'''static bool keyboard(const char* h,const char* g,const std::
 pin_helper = r'''
 static bool javday_pin_prompt(State& st){
     SwkbdConfig k{};
-    if(R_FAILED(swkbdCreate(&k,0))){st.status="JAVDAY PIN 键盘启动失败";return false;}
+    if(R_FAILED(swkbdCreate(&k,0))){st.status="成人专区 PIN 键盘启动失败";return false;}
     swkbdConfigMakePresetPassword(&k);
-    swkbdConfigSetHeaderText(&k,"JAVDAY PIN");
+    swkbdConfigSetHeaderText(&k,"成人专区🔞 PIN");
     swkbdConfigSetGuideText(&k,"请输入开发者 PIN");
     swkbdConfigSetStringLenMin(&k,3);
     swkbdConfigSetStringLenMax(&k,3);
@@ -265,9 +265,9 @@ static bool javday_pin_prompt(State& st){
     char b[32]={0};
     Result rc=swkbdShow(&k,b,sizeof(b));
     swkbdClose(&k);
-    if(R_FAILED(rc)){st.status="已取消打开 JAVDAY";return false;}
-    if(std::string(b)!="SEX"){st.status="JAVDAY PIN 错误";return false;}
-    st.status="JAVDAY PIN 验证成功";
+    if(R_FAILED(rc)){st.status="已取消打开成人专区";return false;}
+    if(std::string(b)!="SEX"){st.status="成人专区 PIN 错误";return false;}
+    st.status="成人专区 PIN 验证成功";
     return true;
 }
 '''
